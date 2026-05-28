@@ -43,6 +43,7 @@ export default function App() {
   const [moodText, setMoodText] = useState('');
   const [isRequesting, setIsRequesting] = useState(false);
   const [moodError, setMoodError] = useState('');
+  const [senderResponse, setSenderResponse] = useState<string | null>(null);
 
   // General Initialization
   useEffect(() => {
@@ -50,6 +51,16 @@ export default function App() {
       inputRef.current.focus();
     }
   }, []);
+
+  // Clear senderResponse after 8 seconds
+  useEffect(() => {
+    if (senderResponse) {
+      const timer = setTimeout(() => {
+        setSenderResponse(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [senderResponse]);
 
   // Sync Sub-states on authorisation
   useEffect(() => {
@@ -66,6 +77,7 @@ export default function App() {
       setOrbExpanded(false);
       setMoodText('');
       setMoodError('');
+      setSenderResponse(null);
     }
   }, [status]);
 
@@ -178,6 +190,7 @@ export default function App() {
       if (data.gradient) {
         setPrevBackgroundGradient(backgroundGradient);
         setBackgroundGradient(data.gradient);
+        setSenderResponse(data.senderResponse || null);
         setOrbExpanded(false);
         setMoodText('');
       } else {
@@ -425,8 +438,12 @@ export default function App() {
                         <motion.div
                           key="orb-compact"
                           layoutId="orb-element"
-                          onClick={() => setOrbExpanded(true)}
+                          onClick={() => {
+                            setOrbExpanded(true);
+                            setSenderResponse(null);
+                          }}
                           className="relative cursor-pointer h-20 w-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center group"
+                          style={{ willChange: "transform, opacity, box-shadow" }}
                           animate={isRequesting ? {
                             scale: [1, 1.25, 1],
                             boxShadow: [
@@ -471,6 +488,7 @@ export default function App() {
                           <motion.div
                             layoutId="orb-element"
                             className="relative w-80 md:w-96 rounded-full border border-white/10 bg-black/45 backdrop-blur-md px-5 py-3.5 flex items-center shadow-[0_15px_50px_rgba(0,0,0,0.6)]"
+                            style={{ willChange: "transform, opacity, box-shadow" }}
                             id="expanded-orb-box"
                           >
                             <form onSubmit={handleMoodSubmit} className="flex items-center w-full relative h-6" id="mood-form">
@@ -531,6 +549,30 @@ export default function App() {
                             </div>
                           )}
                         </div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Private Sender Reflection */}
+                    <AnimatePresence>
+                      {!orbExpanded && senderResponse && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, transition: { duration: 0.8 } }}
+                          transition={{ duration: 1.5, ease: 'easeOut' }}
+                          className="absolute mt-48 px-6 text-center max-w-sm w-full flex flex-col items-center gap-3"
+                        >
+                          <p className="font-serif italic text-lg md:text-xl text-white/90 font-light tracking-wide leading-relaxed">
+                            "{senderResponse}"
+                          </p>
+                          <button
+                            onClick={() => setSenderResponse(null)}
+                            className="text-zinc-500/50 hover:text-white/60 transition-colors p-1"
+                            title="Dismiss"
+                          >
+                            <X size={14} />
+                          </button>
+                        </motion.div>
                       )}
                     </AnimatePresence>
                   </div>

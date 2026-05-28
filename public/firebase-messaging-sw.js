@@ -28,5 +28,19 @@ messaging.onBackgroundMessage((payload) => {
     renotify: true
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+self.registration.showNotification(notificationTitle, notificationOptions);
+});
+
+// Basic PWA Installation/Offline hooks
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  console.log('[firebase-messaging-sw.js] Service Worker installed.');
+});
+
+self.addEventListener('activate', (event) => {
+  console.log('[firebase-messaging-sw.js] Service Worker activated.');
+});
+
+self.addEventListener('fetch', (event) => {
+  // Pass-through fetch for PWA compliance hook
 });

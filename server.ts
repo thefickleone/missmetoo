@@ -96,25 +96,11 @@ app.post("/api/mood", async (req, res) => {
 
     console.log(`Sending prompt: "${message.substring(0, 50)}..." to OpenRouter`);
 
-    const modelCandidates = [
-      "google/gemini-2.5-flash",
-      "deepseek/deepseek-chat",
-      "meta-llama/llama-3.3-70b-instruct",
-      "meta-llama/llama-3-8b-instruct",
-      "meta-llama/llama-3.1-8b-instruct",
-      "google/gemini-2.5-flash:free",
-      "meta-llama/llama-3.1-8b-instruct:free",
-      "meta-llama/llama-3.2-3b-instruct:free",
-      "meta-llama/llama-3-8b-instruct:free",
-      "qwen/qwen-2.5-7b-instruct:free"
-    ];
-
     let response: any = null;
     let lastErrorText = "";
-    let chosenModel = "";
-
-    for (const model of modelCandidates) {
-      console.log(`Attempting to generate color using model: ${model}`);
+    
+    const MAX_RETRIES = 2;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const resObj = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
@@ -122,14 +108,15 @@ app.post("/api/mood", async (req, res) => {
             "Authorization": `Bearer ${apiKey}`,
             "Content-Type": "application/json",
             "HTTP-Referer": "https://ai.studio/build",
-            "X-Title": "The Secret Gateway"
+            "X-Title": "Our Space"
           },
           body: JSON.stringify({
-            model: model,
+            model: "openrouter/free",
+            response_format: { type: "json_object" },
             messages: [
               {
                 role: "system",
-                content: "You are a CSS color generator. Read the user's text, analyze its emotional tone, and return ONLY a valid CSS linear-gradient string using dark, cinematic hex codes (e.g., linear-gradient(to bottom right, #1e3a8a, #000000)). Do not output any other text or markdown."
+                content: "You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:\n1. \"gradient\": A valid CSS linear-gradient string using dark, cinematic hex codes (e.g., \"linear-gradient(to bottom right, #1e3a8a, #000000)\").\n2. \"senderResponse\": A beautiful, comforting, short poetic phrase or grounding thought intended ONLY for the person who typed the message. (e.g., \"Your thought is held in the dark.\")\n3. \"stealthNotification\": A highly formal, completely sterile disguise of the message to be used for a push notification. It must sound like a boring corporate alert, app system log, or generic device notification (e.g., 'System synchronization log update #402 complete' or 'Workspace event log: Routine check pending'). It must contain absolutely no romance, emotion, or names."
               },
               {
                 role: "user",
@@ -137,29 +124,44 @@ app.post("/api/mood", async (req, res) => {
               }
             ],
             temperature: 0.7,
-            max_tokens: 150
+            max_tokens: 200
           })
         });
 
         if (resObj.ok) {
           response = resObj;
-          chosenModel = model;
-          console.log(`Successfully completed generation with model: ${model}`);
-          break;
+          console.log(`Successfully completed generation with openrouter/free`);
+          break; // success, escape retry loop
         } else {
           lastErrorText = await resObj.text();
-          console.warn(`Model ${model} failed with status ${resObj.status}: ${lastErrorText}`);
+          if (resObj.status === 429 && attempt < MAX_RETRIES) {
+            const delayMs = Math.pow(2, attempt) * 1500; // 1.5s, 3s
+            console.log(`OpenRouter rate limited (429). Retrying in ${delayMs}ms...`);
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+          }
+          console.warn(`Model openrouter/free failed (Status ${resObj.status}): ${lastErrorText}`);
+          break;
         }
       } catch (fetchErr: any) {
         lastErrorText = fetchErr?.message || String(fetchErr);
-        console.warn(`Failed to connect using model ${model}:`, fetchErr);
+        if (attempt < MAX_RETRIES) {
+          const delayMs = Math.pow(2, attempt) * 1500;
+          console.warn(`Fetch structural error. Retrying in ${delayMs}ms...`);
+          await new Promise(r => setTimeout(r, delayMs));
+          continue;
+        }
+        console.warn(`Failed to connect using model openrouter/free completely.`, fetchErr);
+        break;
       }
     }
 
     let gradient = "";
+    let senderResponse = "";
+    let stealthNotification = "";
 
     if (!response) {
-      console.warn("All candidate OpenRouter models failed. Applying beautiful cinematic fallback gradient.");
+      console.log("API unavailable. Gently falling back to local cinematic gradients.");
       const FALLBACK_GRADIENTS = [
         "linear-gradient(to bottom right, #0d0a1c, #1f1a3a, #0b0714)",
         "linear-gradient(to bottom right, #09151c, #142834, #050d12)",
@@ -174,29 +176,29 @@ app.post("/api/mood", async (req, res) => {
       }
       const index = Math.abs(hash) % FALLBACK_GRADIENTS.length;
       gradient = FALLBACK_GRADIENTS[index];
+      senderResponse = "The transmission faded, but the intention remains.";
+      stealthNotification = "System Status: Minor connectivity packet dropped.";
     } else {
       const data: any = await response.json();
-      let content = data?.choices?.[0]?.message?.content?.trim();
+      let content = data?.choices?.[0]?.message?.content?.trim() || "{}";
       
-      if (!content) {
-        console.warn(`Empty reply from model ${chosenModel}. Applying cinematic fallback gradient.`);
-        const FALLBACK_GRADIENTS = [
-          "linear-gradient(to bottom right, #0d0a1c, #1f1a3a, #0b0714)",
-          "linear-gradient(to bottom right, #09151c, #142834, #050d12)"
-        ];
-        gradient = FALLBACK_GRADIENTS[message.length % FALLBACK_GRADIENTS.length];
-      } else {
-        // Strip potential Markdown blocks e.g. ```css linear-gradient(...) ```
-        gradient = content;
-        if (gradient.includes("`")) {
-          gradient = gradient.replace(/```css/gi, "").replace(/```/g, "").replace(/`/g, "");
+      try {
+        if (content.includes("`")) {
+          content = content.replace(/```json/gi, "").replace(/```/g, "").replace(/`/g, "");
         }
-        gradient = gradient.trim();
+        const parsed = JSON.parse(content);
+        gradient = parsed.gradient || "linear-gradient(to bottom right, #0d0a1c, #1f1a3a, #0b0714)";
+        senderResponse = parsed.senderResponse || "Your thought is held safely.";
+        stealthNotification = parsed.stealthNotification || "System Status: Log updated.";
+      } catch (e) {
+        gradient = "linear-gradient(to bottom right, #0d0a1c, #1f1a3a, #0b0714)";
+        senderResponse = "Your thought is held safely.";
+        stealthNotification = "System Status: Log updated.";
+      }
 
-        // Ensure trailing semicolon is clean
-        if (gradient.endsWith(";")) {
-          gradient = gradient.slice(0, -1);
-        }
+      // Ensure trailing semicolon is clean
+      if (gradient.endsWith(";")) {
+        gradient = gradient.slice(0, -1);
       }
     }
 
@@ -220,8 +222,8 @@ app.post("/api/mood", async (req, res) => {
           if (firebaseAdmin) {
             const payload = {
               notification: {
-                title: "✨ A new thought arrived",
-                body: message
+                title: "System Notification",
+                body: stealthNotification
               },
               token: partnerToken
             };
@@ -243,7 +245,7 @@ app.post("/api/mood", async (req, res) => {
       }
     }
 
-    return res.json({ gradient });
+    return res.json({ gradient, senderResponse });
   } catch (error: any) {
     console.error("Error in /api/mood route:", error);
     return res.status(500).json({ error: error.message || "Internal Server Error" });
