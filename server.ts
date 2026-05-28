@@ -328,10 +328,12 @@ if (!process.env.VERCEL) {
       });
     }
 
-    const PORT = parseInt(process.env.PORT || '3000', 10);
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running locally on http://0.0.0.0:${PORT}`);
-    });
+    const PORT: number = Number(process.env.PORT) || 3000;
+    if (process.env.NODE_ENV !== 'production') {
+      app.listen(PORT as number, "0.0.0.0", () => {
+        console.log(`[Server]: Frequency open on port ${PORT}`);
+      });
+    }
   };
   startLocalServer();
 }
