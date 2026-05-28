@@ -112,77 +112,119 @@ app.post("/api/mood", async (req, res) => {
       return res.status(400).json({ error: "Message is required." });
     }
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const _geminiKey = process.env.GEMINI_API_KEY;
+    const _openrouterKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = _geminiKey || _openrouterKey;
     if (!apiKey) {
-      console.error("OPENROUTER_API_KEY is not defined in environment variables.");
+      console.error("API key is not defined in environment variables.");
       return res.status(500).json({ error: "API key configuration missing on server." });
     }
 
-    console.log(`Sending prompt: "${message.substring(0, 50)}..." to OpenRouter`);
+    console.log(`Generating response for: "${message.substring(0, 50)}..."`);
 
     let response: any = null;
     let lastErrorText = "";
     
-    const MAX_RETRIES = 2;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const resObj = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://ai.studio/build",
-            "X-Title": "Our Space"
-          },
-          body: JSON.stringify({
-            model: "openrouter/free",
-            response_format: { type: "json_object" },
-            messages: [
-              {
-                role: "system",
-                content: "You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:\n1. \"gradient\": A valid CSS linear-gradient string using dark, cinematic hex codes (e.g., \"linear-gradient(to bottom right, #1e3a8a, #000000)\").\n2. \"senderResponse\": A beautiful, comforting, short poetic phrase or grounding thought intended ONLY for the person who typed the message. (e.g., \"Your thought is held in the dark.\")\n3. \"stealthNotification\": A highly formal, completely sterile disguise of the message to be used for a push notification. It must sound like a boring corporate alert, app system log, or generic device notification (e.g., 'System synchronization log update #402 complete' or 'Workspace event log: Routine check pending'). It must contain absolutely no romance, emotion, or names."
-              },
-              {
-                role: "user",
-                content: message
-              }
-            ],
-            temperature: 0.7,
-            max_tokens: 200
-          })
-        });
-
-        if (resObj.ok) {
-          response = resObj;
-          console.log(`Successfully completed generation with openrouter/free`);
-          break; // success, escape retry loop
-        } else {
-          lastErrorText = await resObj.text();
-          if (resObj.status === 429 && attempt < MAX_RETRIES) {
-            const delayMs = Math.pow(2, attempt) * 1500; // 1.5s, 3s
-            console.log(`OpenRouter rate limited (429). Retrying in ${delayMs}ms...`);
-            await new Promise(r => setTimeout(r, delayMs));
-            continue;
-          }
-          console.warn(`Model openrouter/free failed (Status ${resObj.status}): ${lastErrorText}`);
-          break;
-        }
-      } catch (fetchErr: any) {
-        lastErrorText = fetchErr?.message || String(fetchErr);
-        if (attempt < MAX_RETRIES) {
-          const delayMs = Math.pow(2, attempt) * 1500;
-          console.warn(`Fetch structural error. Retrying in ${delayMs}ms...`);
-          await new Promise(r => setTimeout(r, delayMs));
-          continue;
-        }
-        console.warn(`Failed to connect using model openrouter/free completely.`, fetchErr);
-        break;
-      }
-    }
-
     let gradient = "";
     let senderResponse = "";
     let stealthNotification = "";
+    
+    // We try Google Gemini GenAI first since it's native and stable
+    if (_geminiKey) {
+      try {
+        const { GoogleGenAI } = await import("@google/genai");
+        const ai = new GoogleGenAI({ apiKey: _geminiKey });
+        const prompt = `You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:
+1. "gradient": A valid CSS linear-gradient string using dark, cinematic hex codes (e.g., "linear-gradient(to bottom right, #1e3a8a, #000000)").
+2. "senderResponse": A beautiful, comforting, short poetic phrase or grounding thought intended ONLY for the person who typed the message. (e.g., "Your thought is held in the dark.")
+3. "stealthNotification": A highly formal, completely sterile disguise of the message to be used for a push notification. It must sound like a boring corporate alert, app system log, or generic device notification (e.g., 'System synchronization log update #402 complete' or 'Workspace event log: Routine check pending'). It must contain absolutely no romance, emotion, or names.
+
+Message: "${message}"`;
+
+        const genResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0.7
+          }
+        });
+        console.log(`Successfully completed generation with Gemini 2.5 Flash`);
+        const dataText = genResponse.text;
+        if (dataText) {
+           response = {
+             json: async () => ({
+               choices: [
+                 { message: { content: dataText } }
+               ]
+             })
+           };
+        }
+      } catch (err: any) {
+        console.warn("Gemini generation failed: ", err);
+      }
+    }
+
+    // Fallback to OpenRouter if Gemini failed, or if purely OpenRouter was provided
+    if (!response && _openrouterKey) {
+      console.log("Using OpenRouter fallback...");
+      const MAX_RETRIES = 2;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const resObj = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${_openrouterKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": "https://ai.studio/build",
+              "X-Title": "Our Space"
+            },
+            body: JSON.stringify({
+              model: "mistralai/mistral-7b-instruct:free",
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "system",
+                  content: "You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:\n1. \"gradient\": A valid CSS linear-gradient string using dark, cinematic hex codes (e.g., \"linear-gradient(to bottom right, #1e3a8a, #000000)\").\n2. \"senderResponse\": A beautiful, comforting, short poetic phrase or grounding thought intended ONLY for the person who typed the message. (e.g., \"Your thought is held in the dark.\")\n3. \"stealthNotification\": A highly formal, completely sterile disguise of the message to be used for a push notification. It must sound like a boring corporate alert, app system log, or generic device notification (e.g., 'System synchronization log update #402 complete' or 'Workspace event log: Routine check pending'). It must contain absolutely no romance, emotion, or names."
+                },
+                {
+                  role: "user",
+                  content: message
+                }
+              ],
+              temperature: 0.7,
+              max_tokens: 200
+            })
+          });
+
+          if (resObj.ok) {
+            response = resObj;
+            console.log(`Successfully completed generation with OpenRouter Mistral 7B`);
+            break;
+          } else {
+            lastErrorText = await resObj.text();
+            if (resObj.status === 429 && attempt < MAX_RETRIES) {
+              const delayMs = Math.pow(2, attempt) * 1500;
+              console.log(`OpenRouter rate limited (429). Retrying in ${delayMs}ms...`);
+              await new Promise(r => setTimeout(r, delayMs));
+              continue;
+            }
+            console.warn(`Model OpenRouter failed (Status ${resObj.status}): ${lastErrorText}`);
+            break;
+          }
+        } catch (fetchErr: any) {
+          lastErrorText = fetchErr?.message || String(fetchErr);
+          if (attempt < MAX_RETRIES) {
+            const delayMs = Math.pow(2, attempt) * 1500;
+            console.warn(`Fetch structural error. Retrying in ${delayMs}ms...`);
+            await new Promise(r => setTimeout(r, delayMs));
+            continue;
+          }
+          console.warn(`Failed to connect using OpenRouter completely.`, fetchErr);
+          break;
+        }
+      }
+    }
 
     if (!response) {
       console.log("API unavailable. Gently falling back to local cinematic gradients.");
@@ -277,11 +319,9 @@ app.post("/api/mood", async (req, res) => {
 });
 
 // Serve static elements conditionally if running local Node server instead of serverless functions
-if (process.env.VERCEL) {
-  console.log("Running in Vercel. Listener handled serverless.");
-} else {
+if (!process.env.VERCEL) {
   // Local environment setup
-  async function startLocalServer() {
+  const startLocalServer = async () => {
     if (process.env.NODE_ENV !== "production") {
       const vite = await createViteServer({
         server: { middlewareMode: true },
@@ -297,11 +337,11 @@ if (process.env.VERCEL) {
       });
     }
 
-    const PORT = 3000;
+    const PORT = process.env.PORT || 3000;
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
+      console.log(`Server running locally on http://0.0.0.0:${PORT}`);
     });
-  }
+  };
   startLocalServer();
 }
 
