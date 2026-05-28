@@ -1,0 +1,6 @@
+{
+  "name": "The Secret Gateway",
+  "description": "A dark, cinematic portal requiring a specific frequency password to open the connection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
