@@ -107,10 +107,16 @@ export default function App() {
         });
         console.log('Firebase active Service Worker loaded successfully:', registration);
 
-        const token = await getToken(fbMessaging, { 
-          vapidKey: vapidKey,
-          serviceWorkerRegistration: registration
-        });
+        let token: string | undefined;
+        try {
+          token = await getToken(fbMessaging, { 
+            vapidKey: vapidKey,
+            serviceWorkerRegistration: registration
+          });
+        } catch (tokenErr) {
+          console.warn('Failed to retrieve FCM token gracefully:', tokenErr);
+          return; // Stop gracefully without breaking
+        }
 
         if (token) {
           console.log('Synchronized secure FCM token code.');
@@ -478,6 +484,23 @@ export default function App() {
                           id="glowing-orb"
                         >
                           <div className="h-1.5 w-1.5 rounded-full bg-white/30 group-hover:bg-white/75 transition-colors duration-500" />
+                          
+                          <AnimatePresence>
+                            {isRequesting && (
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1, rotateZ: 360 }}
+                                exit={{ opacity: 0 }}
+                                transition={{
+                                  opacity: { duration: 0.4, ease: "easeInOut" },
+                                  rotateZ: { duration: 1.2, repeat: Infinity, ease: "linear" }
+                                }}
+                                className="absolute -inset-4 rounded-full border border-white/5 border-t-white/80 pointer-events-none"
+                                style={{ willChange: "transform, opacity" }}
+                              />
+                            )}
+                          </AnimatePresence>
+
                           <div className="absolute -bottom-8 pointer-events-none opacity-0 group-hover:opacity-40 transition-opacity duration-700 font-mono text-[8px] tracking-[0.3em] text-white uppercase whitespace-nowrap">
                             Engage Orb
                           </div>

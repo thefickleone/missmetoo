@@ -7,60 +7,84 @@ import fs from "fs";
 
 dotenv.config();
 
-const TOKENS_FILE = path.join(process.cwd(), "tokens.json");
 const SERVICE_ACCOUNT_FILE = path.join(process.cwd(), "firebase-service-account.json");
 
-// Helper to safely read current persisted device tokens
-function readTokens(): Record<string, string> {
-  try {
-    if (fs.existsSync(TOKENS_FILE)) {
-      const data = fs.readFileSync(TOKENS_FILE, "utf8");
-      return JSON.parse(data);
-    }
-  } catch (err) {
-    console.error("Error reading tokens.json:", err);
-  }
-  return {};
-}
-
-// Helper to write/persist a device token for a password association
-function writeToken(password: string, token: string) {
-  try {
-    const tokens = readTokens();
-    tokens[password] = token;
-    fs.writeFileSync(TOKENS_FILE, JSON.stringify(tokens, null, 2), "utf8");
-    console.log(`FCM Token registered and persisted for user "${password}"`);
-  } catch (err) {
-    console.error("Error writing token to tokens.json:", err);
-  }
-}
-
-// Lazy-initialized Firebase Admin instance to check for file-existence safely
+// Lazy-initialized Firebase Admin instance
 let adminApp: admin.app.App | null = null;
 function getFirebaseAdmin(): admin.app.App | null {
   if (!adminApp) {
-    if (fs.existsSync(SERVICE_ACCOUNT_FILE)) {
-      try {
+    try {
+      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+        adminApp = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount)
+        });
+        console.log("Firebase Admin initialized successfully from env var.");
+      } else if (fs.existsSync(SERVICE_ACCOUNT_FILE)) {
         const serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_FILE, "utf8"));
         adminApp = admin.initializeApp({
           credential: admin.credential.cert(serviceAccount)
         });
         console.log("Firebase Admin initialized successfully from service account file.");
-      } catch (err) {
-        console.error("Failed to parse firebase-service-account.json:", err);
+      } else {
+        console.warn("firebase-service-account.json was not found in root. Notifications will handle gracefully as offline/active.");
       }
-    } else {
-      console.warn("firebase-service-account.json was not found in root. Notifications will handle gracefully as offline/active.");
+    } catch (err) {
+      console.error("Failed to parse firebase credentials:", err);
     }
   }
   return adminApp;
 }
 
+// Helper to safely read current persisted device tokens from Firestore
+async function readTokens(): Promise<Record<string, string>> {
+  try {
+    const app = getFirebaseAdmin();
+    if (app) {
+      const snapshot = await app.firestore().collection("device_tokens").get();
+      const tokens: Record<string, string> = {};
+      snapshot.forEach(doc => {
+        tokens[doc.id] = doc.data().token;
+      });
+      return tokens;
+    }
+  } catch (err) {
+    console.error("Error reading tokens from Firestore:", err);
+  }
+  return {};
+}
+
+// Helper to write/persist a device token for a password association to Firestore
+async function writeToken(password: string, token: string) {
+  try {
+    const app = getFirebaseAdmin();
+    if (app) {
+      await app.firestore().collection("device_tokens").doc(password).set({ token });
+      console.log(`FCM Token registered and persisted for user "${password}" in Firestore`);
+    } else {
+      console.warn("Bypassed token write: Firebase admin not initialized.");
+    }
+  } catch (err) {
+    console.error("Error writing token to Firestore:", err);
+  }
+}
+
 const app = express();
 app.use(express.json());
 
+// Stateless Vercel Routing & CORS headers for local dev
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // API Route: Register Device FCM Token mapped to user frequency password
-app.post("/api/register-device", (req, res) => {
+app.post("/api/register-device", async (req, res) => {
   try {
     const { password, token } = req.body;
     if (!password || !token) {
@@ -72,7 +96,7 @@ app.post("/api/register-device", (req, res) => {
       return res.status(400).json({ error: "Invalid login frequency." });
     }
 
-    writeToken(cleanPassword, token);
+    await writeToken(cleanPassword, token);
     return res.json({ success: true });
   } catch (err: any) {
     console.error("Error in /api/register-device:", err);
@@ -215,7 +239,7 @@ app.post("/api/mood", async (req, res) => {
       }
 
       if (partnerPassword) {
-        const tokens = readTokens();
+        const tokens = await readTokens();
         const partnerToken = tokens[partnerPassword];
         if (partnerToken) {
           const firebaseAdmin = getFirebaseAdmin();
