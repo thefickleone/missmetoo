@@ -308,34 +308,26 @@ Message: "${message}"`;
   }
 });
 
-// Serve static elements conditionally if running local Node server instead of serverless functions
-if (!process.env.VERCEL) {
-  // Local environment setup
-  const startLocalServer = async () => {
-    if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
-    } else {
-      // Serve static frontend assets in production build
-      const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
-      app.get("*", (req, res) => {
-        res.sendFile(path.join(distPath, "index.html"));
-      });
-    }
+// Standard Express production listener
+const startServer = async () => {
+  if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Serve static frontend assets in production build
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
 
-    const PORT: number = Number(process.env.PORT) || 3000;
-    if (process.env.NODE_ENV !== 'production') {
-      app.listen(PORT as number, "0.0.0.0", () => {
-        console.log(`[Server]: Frequency open on port ${PORT}`);
-      });
-    }
-  };
-  startLocalServer();
-}
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+};
 
-export default app;
+startServer();
