@@ -1,33 +1,23 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
-import fs from "fs";
 
 dotenv.config();
-
-const SERVICE_ACCOUNT_FILE = path.join(process.cwd(), "firebase-service-account.json");
 
 // Lazy-initialized Firebase Admin instance
 let adminApp: admin.app.App | null = null;
 function getFirebaseAdmin(): admin.app.App | null {
   if (!adminApp) {
     try {
-      if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
         adminApp = admin.initializeApp({
           credential: admin.credential.cert(serviceAccount)
         });
         console.log("Firebase Admin initialized successfully from env var.");
-      } else if (fs.existsSync(SERVICE_ACCOUNT_FILE)) {
-        const serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_FILE, "utf8"));
-        adminApp = admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount)
-        });
-        console.log("Firebase Admin initialized successfully from service account file.");
       } else {
-        console.warn("firebase-service-account.json was not found in root. Notifications will handle gracefully as offline/active.");
+        console.warn("FIREBASE_SERVICE_ACCOUNT not found in env. Notifications will handle gracefully as offline/active.");
       }
     } catch (err) {
       console.error("Failed to parse firebase credentials:", err);
@@ -323,6 +313,7 @@ if (!process.env.VERCEL) {
   // Local environment setup
   const startLocalServer = async () => {
     if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
