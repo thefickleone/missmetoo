@@ -5,7 +5,28 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'express-plugin',
+        configureServer(server) {
+          server.middlewares.use(async (req, res, next) => {
+            if (req.url && req.url.startsWith('/api')) {
+              try {
+                const m = await server.ssrLoadModule('/api/index.ts');
+                m.default(req, res, next);
+              } catch (e) {
+                console.error(e);
+                next(e);
+              }
+            } else {
+              next();
+            }
+          });
+        }
+      }
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
