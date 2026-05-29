@@ -44,6 +44,9 @@ export default function App() {
   const [isRequesting, setIsRequesting] = useState(false);
   const [moodError, setMoodError] = useState('');
   const [senderResponse, setSenderResponse] = useState<string | null>(null);
+  
+  // Storage for incoming echoes
+  const [echoes, setEchoes] = useState<{id: string, text: string, timestamp: number}[]>([]);
 
   // General Initialization
   useEffect(() => {
@@ -61,6 +64,22 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [senderResponse]);
+
+  // Load Echoes on Dashboard Entry
+  useEffect(() => {
+    if (subStatus === 'dashboard' && password) {
+      fetch(`/api/history?password=${encodeURIComponent(password)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setEchoes(data);
+          }
+        })
+        .catch(err => console.error("Failed to load echoes:", err));
+    } else {
+      setEchoes([]);
+    }
+  }, [subStatus, password]);
 
   // Sync Sub-states on authorisation
   useEffect(() => {
@@ -600,8 +619,49 @@ export default function App() {
                     </AnimatePresence>
                   </div>
 
+                  {/* Echoes Floating Rendering (24-Hour Archive) */}
+                  <div 
+                    className="absolute top-[62%] w-full flex flex-col items-center px-6 pointer-events-none z-10 space-y-7 max-h-[30vh] overflow-hidden" 
+                    style={{ 
+                      maskImage: 'linear-gradient(to bottom, black 40%, transparent 100%)', 
+                      WebkitMaskImage: 'linear-gradient(to bottom, black 30%, transparent 100%)' 
+                    }}
+                  >
+                    <AnimatePresence>
+                      {!orbExpanded && echoes.map((echo, idx) => {
+                        const hoursAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60 * 60)));
+                        const minutesAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60)));
+                        let timeText = "";
+                        if (hoursAgo === 0) {
+                          if (minutesAgo < 5) timeText = "Received just now... fading soon";
+                          else timeText = `Received ${minutesAgo} minute${minutesAgo !== 1 ? 's' : ''} ago... fading soon`;
+                        } else {
+                          timeText = `Received ${hoursAgo} hour${hoursAgo !== 1 ? 's' : ''} ago... fading soon`;
+                        }
+
+                        return (
+                          <motion.div
+                            key={echo.id}
+                            initial={{ opacity: 0, y: 15 }}
+                            animate={{ opacity: Math.max(1 - (idx * 0.25), 0), y: 0 }}
+                            exit={{ opacity: 0, filter: 'blur(5px)' }}
+                            transition={{ duration: 1.5, delay: idx * 0.1, ease: 'easeOut' }}
+                            className="flex flex-col items-center text-center max-w-sm w-full pointer-events-auto"
+                          >
+                            <p className="font-serif italic text-base md:text-lg text-zinc-400 font-light leading-relaxed mb-1.5 drop-shadow-md line-clamp-3">
+                              "{echo.text}"
+                            </p>
+                            <span className="font-mono text-[8px] uppercase tracking-[0.25em] text-zinc-600">
+                              {timeText}
+                            </span>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </div>
+
                   {/* Status Panel Details at Bottom Staging */}
-                  <div className="absolute bottom-20 flex flex-col items-center gap-4 text-center z-10" id="authorised-panel">
+                  <div className="absolute bottom-16 flex flex-col items-center gap-4 text-center z-20" id="authorised-panel">
                     <AnimatePresence>
                       {backgroundGradient !== '#050505' && (
                         <motion.button

@@ -270,13 +270,23 @@ Message: "${message}"`;
       }
 
       if (partnerPassword) {
+        const firebaseAdmin = getFirebaseAdmin();
+        if (firebaseAdmin) {
+          // Write the RAW message to Firestore 24-Hour Archive
+          firebaseAdmin.firestore().collection("messages").add({
+            sender: cleanPassword,
+            receiver: partnerPassword,
+            text: message,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          }).catch(err => console.error("Failed to archive message:", err));
+        }
+
         const tokens = await readTokens();
         const partnerToken = tokens[partnerPassword];
         if (partnerToken) {
-          const firebaseAdmin = getFirebaseAdmin();
           if (firebaseAdmin) {
             const payload = {
-              notification: {
+              data: {
                 title: "System Notification",
                 body: stealthNotification
               },
@@ -304,6 +314,52 @@ Message: "${message}"`;
   } catch (error: any) {
     console.error("Error in /api/mood route:", error);
     return res.status(500).json({ error: error.message || "Internal Server Error" });
+  }
+});
+
+// API Route: Echoes History (24-Hour Archive)
+app.get("/api/history", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    const firebaseAdmin = getFirebaseAdmin();
+    
+    if (!firebaseAdmin) {
+      return res.json([]);
+    }
+
+    const snapshot = await firebaseAdmin.firestore().collection("messages")
+      .where("receiver", "==", cleanPassword)
+      .get();
+
+    const now = Date.now();
+    const echoes: any[] = [];
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.timestamp) {
+        const ts = data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+        if (now - ts < 24 * 60 * 60 * 1000) { // Within last 24 hours
+          echoes.push({
+            id: doc.id,
+            text: data.text,
+            timestamp: ts
+          });
+        }
+      }
+    });
+
+    // Sort descending by timestamp (newest first)
+    echoes.sort((a, b) => b.timestamp - a.timestamp);
+
+    return res.json(echoes);
+  } catch (err: any) {
+    console.error("Error in /api/history:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
 

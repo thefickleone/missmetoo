@@ -20,9 +20,9 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log('[firebase-messaging-sw.js] Silent background notification encountered:', payload);
   
-  const notificationTitle = payload.notification?.title || '✨ A new thought arrived';
+  const notificationTitle = payload.data?.title || '✨ A new thought arrived';
   const notificationOptions = {
-    body: payload.notification?.body || 'Connection has been populated with resonance.',
+    body: payload.data?.body || 'Connection has been populated with resonance.',
     icon: '/icon.png',
     tag: 'frequency-thought-link',
     renotify: true
