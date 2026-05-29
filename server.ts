@@ -170,7 +170,7 @@ Message: "${message}"`;
               "X-Title": "Our Space"
             },
             body: JSON.stringify({
-              model: "mistralai/mistral-7b-instruct:free",
+              model: "openrouter/free",
               response_format: { type: "json_object" },
               messages: [
                 {
@@ -326,8 +326,8 @@ const startServer = async () => {
     });
   }
 
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  const PORT: number = Number(process.env.PORT) || 3000;
+  app.listen(PORT, "0.0.0.0", () => console.log(`[Server] Resonance established on port ${PORT}`));
 };
 
 startServer();
