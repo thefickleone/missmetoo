@@ -1,235 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import fs from 'fs';
+let content = fs.readFileSync('src/App.tsx', 'utf8');
 
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, X } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-
-// Client-side Firebase configuration with secure direct fallbacks
-const metaEnv = (import.meta as any).env || {};
-
-const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || "AIzaSyA40UiX-MJqa85db5wPLz5DrrKZnCjLTTg",
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || "missmetoo-39082.firebaseapp.com",
-  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || "missmetoo-39082",
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || "missmetoo-39082.firebasestorage.app",
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "495217081378",
-  appId: metaEnv.VITE_FIREBASE_APP_ID || "1:495217081378:web:4bb664bcae927ce6c41e7b"
-};
-
-const vapidKey = metaEnv.VITE_VAPID_KEY || "BKUkIXMTZWbSkMJJ4LjlLJvL9CD29LI8GKzeO8dHPBcgqsyMydQ9RMEPw2vKViTvASc3xKwIRSfDmLRpbk3vQlQ";
-
-type GatewayStatus = 'login' | 'transition' | 'authorised';
-type SubStatus = 'greeting' | 'dashboard';
-
-export default function App() {
-  // Authentication Gateway State
-  const [password, setPassword] = useState('');
-  const [status, setStatus] = useState<GatewayStatus>('login');
-  const [isError, setIsError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Step 2 Dashboard & Mood Resonance State
-  const [subStatus, setSubStatus] = useState<SubStatus>('greeting');
-  const [backgroundGradient, setBackgroundGradient] = useState<string>('#050505');
-  const [prevBackgroundGradient, setPrevBackgroundGradient] = useState<string>('#050505');
-  
-  const [orbExpanded, setOrbExpanded] = useState(false);
-  const [moodText, setMoodText] = useState('');
-  const [isRequesting, setIsRequesting] = useState(false);
-  const [moodError, setMoodError] = useState('');
-  const [senderResponse, setSenderResponse] = useState<string | null>(null);
-  
-  // Storage for incoming echoes
-  const [echoes, setEchoes] = useState<{id: string, text: string, timestamp: number}[]>([]);
-
-  // General Initialization
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, []);
-
-  // Clear senderResponse after 8 seconds
-  useEffect(() => {
-    if (senderResponse) {
-      const timer = setTimeout(() => {
-        setSenderResponse(null);
-      }, 8000);
-      return () => clearTimeout(timer);
-    }
-  }, [senderResponse]);
-
-  // Load Echoes on Dashboard Entry
-  useEffect(() => {
-    if (subStatus === 'dashboard' && password) {
-      fetch(`/api/history?password=${encodeURIComponent(password)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data)) {
-            setEchoes(data);
-          }
-        })
-        .catch(err => console.error("Failed to load echoes:", err));
-    } else {
-      setEchoes([]);
-    }
-  }, [subStatus, password]);
-
-  // Sync Sub-states on authorisation
-  useEffect(() => {
-    if (status === 'authorised') {
-      setSubStatus('greeting');
-      const timer = setTimeout(() => {
-        setSubStatus('dashboard');
-      }, 3200);
-      return () => clearTimeout(timer);
-    } else {
-      setSubStatus('greeting');
-      setBackgroundGradient('#050505');
-      setPrevBackgroundGradient('#050505');
-      setOrbExpanded(false);
-      setMoodText('');
-      setMoodError('');
-      setSenderResponse(null);
-    }
-  }, [status]);
-
-  // Seamless client background device token synchronization
-  useEffect(() => {
-    if (status !== 'authorised') return;
-
-    const setupPushNotifications = async () => {
-      try {
-        if (!('Notification' in window) || !('serviceWorker' in navigator)) {
-          console.warn('System browser lacks push credentials support.');
-          return;
-        }
-
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') {
-          console.warn('Notification channel permission withheld.');
-          return;
-        }
-
-        const fbApp = initializeApp(firebaseConfig);
-        const fbMessaging = getMessaging(fbApp);
-
-        // Register the background service worker explicitly inside root scope to avoid sandbox relative routing issues
-        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
-          scope: '/'
-        });
-        console.log('Firebase active Service Worker loaded successfully:', registration);
-
-        let token: string | undefined;
-        try {
-          token = await getToken(fbMessaging, { 
-            vapidKey: vapidKey,
-            serviceWorkerRegistration: registration
-          });
-        } catch (tokenErr) {
-          console.warn('Failed to retrieve FCM token gracefully:', tokenErr);
-          return; // Stop gracefully without breaking
-        }
-
-        if (token) {
-          console.log('Synchronized secure FCM token code.');
-          await fetch('/api/register-device', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              password: password,
-              token: token
-            })
-          });
-        } else {
-          console.warn('FCM instance token was empty.');
-        }
-
-        // Catch foreground real-time incoming messages
-        onMessage(fbMessaging, (payload) => {
-          console.log('Foreground real-time thought payload arrived:', payload);
-        });
-
-      } catch (err) {
-        console.error('Error during silent push initialization feed:', err);
-      }
-    };
-
-    setupPushNotifications();
-  }, [status, password]);
-
-  // Submit Password (Step 1 Gateway)
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanPassword = password.trim().toLowerCase();
-
-    if (cleanPassword === 'milanlovesroja' || cleanPassword === 'rojalovesmilan') {
-      setIsError(false);
-      setErrorMessage('');
-      setStatus('transition');
-      setTimeout(() => {
-        setStatus('authorised');
-      }, 1600);
-    } else {
-      setIsError(true);
-      setErrorMessage('Frequency mismatch.');
-      setTimeout(() => {
-        setIsError(false);
-      }, 600);
-    }
-  };
-
-  // Submit Mood Text (Step 2 Dashboard Orb)
-  const handleMoodSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!moodText.trim() || isRequesting) return;
-
-    setIsRequesting(true);
-    setMoodError('');
-
-    try {
-      const response = await fetch('/api/mood', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          message: moodText, 
-          password: password 
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Connection resonance lost.');
-      }
-
-      const data = await response.json();
-      if (data.gradient) {
-        setPrevBackgroundGradient(backgroundGradient);
-        setBackgroundGradient(data.gradient);
-        setSenderResponse(data.senderResponse || null);
-        setOrbExpanded(false);
-        setMoodText('');
-      } else {
-        throw new Error('System output format unreadable.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setMoodError(err.message || 'Transmission disrupted.');
-    } finally {
-      setIsRequesting(false);
-    }
-  };
-
-  return (
+const returnStatement = `return (
     <div 
       className="relative flex h-screen w-screen items-center justify-center overflow-hidden text-[#fafafa] font-sans selection:bg-white/30 selection:text-white bg-[#050505]"
       id="portal-container"
@@ -250,7 +22,7 @@ export default function App() {
         onAnimationComplete={() => {
           setPrevBackgroundGradient(backgroundGradient);
         }}
-        className="absolute inset-0 pointer-events-none z-0 bg-black/20"
+        className="absolute inset-0 pointer-events-none z-0"
         style={{ background: backgroundGradient }}
         id="bg-active-layer"
       />
@@ -302,7 +74,7 @@ export default function App() {
                       x: [0, -8, 8, -6, 6, -3, 3, 0],
                     } : {}}
                     transition={{ duration: 0.5, ease: 'easeInOut' }}
-                    className={`w-full transition-all duration-500 ${isError ? 'opacity-80' : 'opacity-100'}`}
+                    className={\`w-full transition-all duration-500 \${isError ? 'opacity-80' : 'opacity-100'}\`}
                   >
                     <input
                       ref={inputRef}
@@ -314,7 +86,7 @@ export default function App() {
                       }}
                       autoFocus
                       placeholder="••••••••••••••"
-                      className={`w-full bg-white/5 border ${isError ? 'border-red-400/50 bg-red-400/5 text-red-100 placeholder-red-200/50' : 'border-white/10 hover:border-white/20 focus:border-white/30 text-white placeholder-white/20'} rounded-2xl px-6 py-4 text-center font-sans tracking-[0.5em] text-lg outline-none transition-all duration-300 shadow-inner backdrop-blur-md`}
+                      className={\`w-full bg-white/5 border \${isError ? 'border-red-400/50 bg-red-400/5 text-red-100 placeholder-red-200/50' : 'border-white/10 hover:border-white/20 focus:border-white/30 text-white placeholder-white/20'} rounded-2xl px-6 py-4 text-center font-sans tracking-[0.5em] text-lg outline-none transition-all duration-300 shadow-inner backdrop-blur-md\`}
                       style={{ WebkitTextSecurity: 'disc' }}
                       id="frequency-input"
                       spellCheck="false"
@@ -474,7 +246,7 @@ export default function App() {
                           }}
                         >
                           {/* Inner glowing core */}
-                          <div className={`h-3 w-3 rounded-full bg-white/70 shadow-[0_0_20px_rgba(255,255,255,1)] transition-transform duration-700 ${isRequesting ? 'scale-150' : 'group-hover:scale-150'}`} />
+                          <div className={\`h-3 w-3 rounded-full bg-white/70 shadow-[0_0_20px_rgba(255,255,255,1)] transition-transform duration-700 \${isRequesting ? 'scale-150' : 'group-hover:scale-150'}\`} />
                           
                           <AnimatePresence>
                             {isRequesting && (
@@ -537,7 +309,7 @@ export default function App() {
                               <button
                                 type="submit"
                                 disabled={isRequesting || !moodText.trim()}
-                                className={`p-2 rounded-full transition-all duration-300 ${(!moodText.trim() || isRequesting) ? 'text-white/20' : 'text-white hover:bg-white/10 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)]'}`}
+                                className={\`p-2 rounded-full transition-all duration-300 \${(!moodText.trim() || isRequesting) ? 'text-white/20' : 'text-white hover:bg-white/10 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)]'}\`}
                               >
                                 {isRequesting ? (
                                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -605,9 +377,9 @@ export default function App() {
                         let timeText = "";
                         if (hoursAgo === 0) {
                           if (minutesAgo < 5) timeText = "Received just now";
-                          else timeText = `Received ${minutesAgo} min ago`;
+                          else timeText = \`Received \${minutesAgo} min ago\`;
                         } else {
-                          timeText = `Received ${hoursAgo} hr${hoursAgo !== 1 ? 's' : ''} ago`;
+                          timeText = \`Received \${hoursAgo} hr\${hoursAgo !== 1 ? 's' : ''} ago\`;
                         }
 
                         return (
@@ -671,3 +443,9 @@ export default function App() {
     </div>
   );
 }
+`;
+
+const targetRegex = /return \([\s\S]*\}\;/;
+const modifiedContent = content.replace(targetRegex, returnStatement);
+
+fs.writeFileSync('src/App.tsx', modifiedContent, 'utf8');

@@ -120,37 +120,46 @@ app.post("/api/mood", async (req, res) => {
     
     // We try Google Gemini GenAI first since it's native and stable
     if (_geminiKey) {
-      try {
-        const { GoogleGenAI } = await import("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: _geminiKey });
-        const prompt = `You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:
+      const MAX_GEMINI_RETRIES = 2;
+      for (let attempt = 0; attempt <= MAX_GEMINI_RETRIES; attempt++) {
+        try {
+          const { GoogleGenAI } = await import("@google/genai");
+          const ai = new GoogleGenAI({ apiKey: _geminiKey });
+          const prompt = `You are an AI generating elements for a minimal, private communication channel. Read the user's text and analyze its emotional tone. You MUST return ONLY a strict JSON object with EXACTLY three string properties, no markdown wrappers:
 1. "gradient": A valid CSS linear-gradient string using dark, cinematic hex codes (e.g., "linear-gradient(to bottom right, #1e3a8a, #000000)").
 2. "senderResponse": A beautiful, comforting, short poetic phrase or grounding thought intended ONLY for the person who typed the message. (e.g., "Your thought is held in the dark.")
 3. "stealthNotification": A highly formal, completely sterile disguise of the message to be used for a push notification. It must sound like a boring corporate alert, app system log, or generic device notification (e.g., 'System synchronization log update #402 complete' or 'Workspace event log: Routine check pending'). It must contain absolutely no romance, emotion, or names.
 
 Message: "${message}"`;
 
-        const genResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.7
+          const genResponse = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.7
+            }
+          });
+          console.log(`Successfully completed generation with Gemini 2.5 Flash`);
+          const dataText = genResponse.text;
+          if (dataText) {
+             response = {
+               json: async () => ({
+                 choices: [
+                   { message: { content: dataText } }
+                 ]
+               })
+             };
           }
-        });
-        console.log(`Successfully completed generation with Gemini 2.5 Flash`);
-        const dataText = genResponse.text;
-        if (dataText) {
-           response = {
-             json: async () => ({
-               choices: [
-                 { message: { content: dataText } }
-               ]
-             })
-           };
+          break; // Success
+        } catch (err: any) {
+          console.warn(`Gemini generation attempt ${attempt + 1} failed: `, err.message || err);
+          if (attempt < MAX_GEMINI_RETRIES) {
+            const delayMs = Math.pow(2, attempt) * 1500;
+            console.log(`Retrying Gemini in ${delayMs}ms...`);
+            await new Promise(r => setTimeout(r, delayMs));
+          }
         }
-      } catch (err: any) {
-        console.warn("Gemini generation failed: ", err);
       }
     }
 
