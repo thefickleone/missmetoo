@@ -1043,12 +1043,12 @@ export default function App() {
                                <motion.div 
                                   className={`h-full relative overflow-hidden transition-colors duration-1000 ${
                                     partnerSlapCount === 0 ? 'bg-white/10'
-                                    : partnerSlapCount < 6 ? 'bg-teal-400/80 shadow-[0_0_10px_theme(colors.teal.400)]' 
-                                    : partnerSlapCount < 20 ? 'bg-orange-500/90 shadow-[0_0_15px_theme(colors.orange.500)]' 
+                                    : partnerSlapCount <= 35 ? 'bg-teal-400/80 shadow-[0_0_10px_theme(colors.teal.400)]' 
+                                    : partnerSlapCount <= 80 ? 'bg-orange-500/90 shadow-[0_0_15px_theme(colors.orange.500)]' 
                                     : 'bg-red-600 shadow-[0_0_20px_theme(colors.red.600)]'
                                   }`}
                                   initial={{ width: 0 }}
-                                  animate={{ width: `${Math.min((partnerSlapCount / 30) * 100, 100)}%` }}
+                                  animate={{ width: `${Math.min((partnerSlapCount / 150) * 100, 100)}%` }}
                                   transition={{ duration: 0.8, ease: 'easeOut' }}
                                >
                                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-[shimmer_2s_infinite]" />
