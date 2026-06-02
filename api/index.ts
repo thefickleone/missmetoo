@@ -341,29 +341,39 @@ app.get("/api/history", async (req, res) => {
       return res.json([]);
     }
 
-    const snapshot = await firebaseAdmin.firestore().collection("messages")
-      .where("receiver", "==", cleanPassword)
-      .get();
+    const db = firebaseAdmin.firestore();
+    const [receivedSnap, sentSnap] = await Promise.all([
+      db.collection("messages").where("receiver", "==", cleanPassword).get(),
+      db.collection("messages").where("sender", "==", cleanPassword).get()
+    ]);
 
     const now = Date.now();
-    const echoes: any[] = [];
+    const echoesMap = new Map<string, any>();
     
-    snapshot.forEach(doc => {
+    const processDoc = (doc: any) => {
       const data = doc.data();
       if (data.timestamp) {
         const ts = data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
         if (now - ts < 24 * 60 * 60 * 1000) { // Within last 24 hours
-          echoes.push({
-            id: doc.id,
-            text: data.text,
-            timestamp: ts
-          });
+          if (!echoesMap.has(doc.id)) {
+            echoesMap.set(doc.id, {
+              id: doc.id,
+              text: data.text,
+              timestamp: ts,
+              sender: data.sender
+            });
+          }
         }
       }
-    });
+    };
 
-    // Sort descending by timestamp (newest first)
-    echoes.sort((a, b) => b.timestamp - a.timestamp);
+    receivedSnap.forEach(processDoc);
+    sentSnap.forEach(processDoc);
+
+    const echoes = Array.from(echoesMap.values());
+
+    // Sort ascending by timestamp (oldest first like typical chat)
+    echoes.sort((a, b) => a.timestamp - b.timestamp);
 
     return res.json(echoes);
   } catch (err: any) {
@@ -453,6 +463,333 @@ app.get("/api/stories", async (req, res) => {
     return res.json(stories);
   } catch (err: any) {
     console.error("Error in /api/stories:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Submit a song suggestion
+app.post("/api/song", async (req, res) => {
+  try {
+    const { title, artist, password } = req.body;
+    if (!password || !title || !artist) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    let partnerPassword = "";
+    if (cleanPassword === "milanlovesroja") {
+      partnerPassword = "rojalovesmilan";
+    } else if (cleanPassword === "rojalovesmilan") {
+      partnerPassword = "milanlovesroja";
+    } else {
+      return res.status(401).json({ error: "Invalid password." });
+    }
+
+    const firebaseAdmin = getFirebaseAdmin();
+    if (firebaseAdmin) {
+      await firebaseAdmin.firestore().collection("songs").add({
+        sender: cleanPassword,
+        receiver: partnerPassword,
+        title: title.trim(),
+        artist: artist.trim(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return res.json({ success: true });
+    } else {
+      return res.status(500).json({ error: "Firebase DB unavailable." });
+    }
+  } catch (err: any) {
+    console.error("Error in /api/song (POST):", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Get latest song suggestion
+app.get("/api/song", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    const firebaseAdmin = getFirebaseAdmin();
+    
+    if (!firebaseAdmin) {
+      return res.json(null);
+    }
+
+    // Using basic where and manual sorting to avoid missing index errors
+    const snapshot = await firebaseAdmin.firestore().collection("songs")
+      .where("receiver", "==", cleanPassword)
+      .get();
+
+    let latestSong: any = null;
+    let latestTs = 0;
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.timestamp) {
+        const ts = data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+        if (ts > latestTs) {
+          latestTs = ts;
+          latestSong = {
+            id: doc.id,
+            title: data.title,
+            artist: data.artist,
+            sender: data.sender,
+            timestamp: ts
+          };
+        }
+      }
+    });
+
+    return res.json(latestSong);
+  } catch (err: any) {
+    console.error("Error in /api/song (GET):", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Activity Status (Angry App Trigger)
+app.get("/api/activity-status", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    const firebaseAdmin = getFirebaseAdmin();
+    
+    if (!firebaseAdmin) {
+      return res.json({ isAngry: false });
+    }
+
+    const db = firebaseAdmin.firestore();
+    const [msgRecSnap, msgSentSnap, storyRecSnap, storySentSnap] = await Promise.all([
+      db.collection("messages").where("receiver", "==", cleanPassword).get(),
+      db.collection("messages").where("sender", "==", cleanPassword).get(),
+      db.collection("stories").where("receiver", "==", cleanPassword).get(),
+      db.collection("stories").where("sender", "==", cleanPassword).get()
+    ]);
+
+    const now = Date.now();
+    let hasRecentActivity = false;
+
+    const checkDocs = (snapshot: FirebaseFirestore.QuerySnapshot) => {
+      if (hasRecentActivity) return;
+      snapshot.forEach(doc => {
+        if (hasRecentActivity) return;
+        const data = doc.data();
+        if (data.timestamp) {
+          const ts = data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+          if (now - ts < 24 * 60 * 60 * 1000) {
+            hasRecentActivity = true;
+          }
+        }
+      });
+    };
+
+    checkDocs(msgRecSnap);
+    checkDocs(msgSentSnap);
+    checkDocs(storyRecSnap);
+    checkDocs(storySentSnap);
+
+    return res.json({ isAngry: !hasRecentActivity });
+  } catch (err: any) {
+    console.error("Error in /api/activity-status:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Submit special memory
+app.post("/api/memories", async (req, res) => {
+  try {
+    const { date, time, note, password } = req.body;
+    if (!password || !date || !time || !note) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    let partnerPassword = "";
+    if (cleanPassword === "milanlovesroja") {
+      partnerPassword = "rojalovesmilan";
+    } else if (cleanPassword === "rojalovesmilan") {
+      partnerPassword = "milanlovesroja";
+    } else {
+      return res.status(401).json({ error: "Invalid password." });
+    }
+
+    const firebaseAdmin = getFirebaseAdmin();
+    if (firebaseAdmin) {
+      await firebaseAdmin.firestore().collection("special_memories").add({
+        sender: cleanPassword,
+        receiver: partnerPassword,
+        date: date.trim(),
+        time: time.trim(),
+        note: note.trim(),
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return res.json({ success: true });
+    } else {
+      return res.status(500).json({ error: "Firebase DB unavailable." });
+    }
+  } catch (err: any) {
+    console.error("Error in /api/memories (POST):", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Get special memories
+app.get("/api/memories", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    const firebaseAdmin = getFirebaseAdmin();
+    
+    if (!firebaseAdmin) {
+      return res.json([]);
+    }
+
+    const db = firebaseAdmin.firestore();
+    const [receivedSnap, sentSnap] = await Promise.all([
+      db.collection("special_memories").where("receiver", "==", cleanPassword).get(),
+      db.collection("special_memories").where("sender", "==", cleanPassword).get()
+    ]);
+
+    const memoriesMap = new Map<string, any>();
+    
+    const processDoc = (doc: any) => {
+      const data = doc.data();
+      if (!memoriesMap.has(doc.id)) {
+        memoriesMap.set(doc.id, {
+          id: doc.id,
+          date: data.date,
+          time: data.time,
+          note: data.note,
+          sender: data.sender,
+          createdAt: data.timestamp ? (data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime()) : 0
+        });
+      }
+    };
+
+    receivedSnap.forEach(processDoc);
+    sentSnap.forEach(processDoc);
+
+    const memories = Array.from(memoriesMap.values());
+
+    // Sort chronologically by custom date (and time)
+    memories.sort((a, b) => {
+      const dateA = new Date(`${a.date}T${a.time || "00:00"}`).getTime();
+      const dateB = new Date(`${b.date}T${b.time || "00:00"}`).getTime();
+      return dateA - dateB; // oldest to newest
+    });
+
+    return res.json(memories);
+  } catch (err: any) {
+    console.error("Error in /api/memories (GET):", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Slap (Vent Anger)
+app.post("/api/anger/slap", async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: "Password is required." });
+    const cleanPassword = password.trim().toLowerCase();
+    let partnerPassword = cleanPassword === "milanlovesroja" ? "rojalovesmilan" : (cleanPassword === "rojalovesmilan" ? "milanlovesroja" : "");
+    if (!partnerPassword) return res.status(401).json({ error: "Invalid password." });
+
+    const firebaseAdmin = getFirebaseAdmin();
+    if (!firebaseAdmin) return res.status(500).json({ error: "Firebase unavailable." });
+
+    const db = firebaseAdmin.firestore();
+    const querySnap = await db.collection("temperatures")
+      .where("sender", "==", cleanPassword)
+      .where("receiver", "==", partnerPassword)
+      .limit(1).get();
+
+    if (querySnap.empty) {
+      await db.collection("temperatures").add({
+        sender: cleanPassword,
+        receiver: partnerPassword,
+        slapCount: 1,
+        isActive: true,
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } else {
+      const doc = querySnap.docs[0];
+      await doc.ref.update({
+        slapCount: admin.firestore.FieldValue.increment(1),
+        isActive: true,
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("Error in /api/anger/slap:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Anger Status
+app.get("/api/anger/status", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== 'string') return res.status(400).json({ error: "Password required." });
+    const cleanPassword = password.trim().toLowerCase();
+    
+    const firebaseAdmin = getFirebaseAdmin();
+    if (!firebaseAdmin) return res.json({ isPartnerAngry: false, slapCount: 0 });
+
+    const db = firebaseAdmin.firestore();
+    const querySnap = await db.collection("temperatures")
+      .where("receiver", "==", cleanPassword)
+      .limit(1).get();
+      
+    if (querySnap.empty) {
+      return res.json({ isPartnerAngry: false, slapCount: 0 });
+    } else {
+      const data = querySnap.docs[0].data();
+      return res.json({ isPartnerAngry: !!data.isActive, slapCount: data.slapCount || 0 });
+    }
+  } catch (err: any) {
+    console.error("Error in /api/anger/status:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Soothe Anger
+app.post("/api/anger/soothe", async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: "Password required." });
+    const cleanPassword = password.trim().toLowerCase();
+    
+    const firebaseAdmin = getFirebaseAdmin();
+    if (!firebaseAdmin) return res.status(500).json({ error: "Firebase unavailable." });
+
+    const db = firebaseAdmin.firestore();
+    const querySnap = await db.collection("temperatures")
+      .where("receiver", "==", cleanPassword)
+      .limit(1).get();
+      
+    if (!querySnap.empty) {
+      await querySnap.docs[0].ref.update({
+        isActive: false,
+        slapCount: 0,
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error("Error in /api/anger/soothe:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
   }
 });
