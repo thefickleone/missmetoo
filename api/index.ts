@@ -59,7 +59,7 @@ async function writeToken(password: string, token: string) {
 }
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Stateless Vercel Routing & CORS headers for local dev
 app.use((req, res, next) => {
@@ -368,6 +368,91 @@ app.get("/api/history", async (req, res) => {
     return res.json(echoes);
   } catch (err: any) {
     console.error("Error in /api/history:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Submit a 24-hr Story
+app.post("/api/story", async (req, res) => {
+  try {
+    const { image, note, password } = req.body;
+    if (!password || (!image && !note)) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    let partnerPassword = "";
+    if (cleanPassword === "milanlovesroja") {
+      partnerPassword = "rojalovesmilan";
+    } else if (cleanPassword === "rojalovesmilan") {
+      partnerPassword = "milanlovesroja";
+    } else {
+      return res.status(401).json({ error: "Invalid password." });
+    }
+
+    const firebaseAdmin = getFirebaseAdmin();
+    if (firebaseAdmin) {
+      await firebaseAdmin.firestore().collection("stories").add({
+        sender: cleanPassword,
+        receiver: partnerPassword,
+        image: image || "",
+        note: note || "",
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return res.json({ success: true });
+    } else {
+      return res.status(500).json({ error: "Firebase DB unavailable." });
+    }
+  } catch (err: any) {
+    console.error("Error in /api/story:", err);
+    return res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
+// API Route: Get 24-hr Stories
+app.get("/api/stories", async (req, res) => {
+  try {
+    const { password } = req.query;
+    if (!password || typeof password !== 'string') {
+      return res.status(400).json({ error: "Password is required." });
+    }
+
+    const cleanPassword = password.trim().toLowerCase();
+    const firebaseAdmin = getFirebaseAdmin();
+    
+    if (!firebaseAdmin) {
+      return res.json([]);
+    }
+
+    const snapshot = await firebaseAdmin.firestore().collection("stories")
+      .where("receiver", "==", cleanPassword)
+      .get();
+
+    const now = Date.now();
+    const stories: any[] = [];
+    
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.timestamp) {
+        const ts = data.timestamp.toDate ? data.timestamp.toDate().getTime() : new Date(data.timestamp).getTime();
+        if (now - ts < 24 * 60 * 60 * 1000) { // Within last 24 hours
+          stories.push({
+            id: doc.id,
+            image: data.image,
+            note: data.note,
+            timestamp: ts,
+            sender: data.sender
+          });
+        }
+      }
+    });
+
+    // Sort ascending by timestamp (oldest first like typical stories)
+    stories.sort((a, b) => a.timestamp - b.timestamp);
+
+    return res.json(stories);
+  } catch (err: any) {
+    console.error("Error in /api/stories:", err);
     return res.status(500).json({ error: err.message || "Internal server error" });
   }
 });

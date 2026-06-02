@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, X, Clock } from 'lucide-react';
+import { ArrowRight, X, Clock, Camera, Image as ImageIcon } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
@@ -49,6 +49,15 @@ export default function App() {
   const [echoes, setEchoes] = useState<{id: string, text: string, timestamp: number}[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Moments Feature State
+  const [stories, setStories] = useState<{id: string, image: string, note: string, timestamp: number, sender: string}[]>([]);
+  const [showStoryUpload, setShowStoryUpload] = useState(false);
+  const [storyNote, setStoryNote] = useState('');
+  const [storyImageStr, setStoryImageStr] = useState<string>('');
+  const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const [viewingStoryIdx, setViewingStoryIdx] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // General Initialization
   useEffect(() => {
     if (inputRef.current) {
@@ -77,8 +86,18 @@ export default function App() {
           }
         })
         .catch(err => console.error("Failed to load echoes:", err));
+
+      fetch(`/api/stories?password=${encodeURIComponent(password)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setStories(data);
+          }
+        })
+        .catch(err => console.error("Failed to load stories:", err));
     } else {
       setEchoes([]);
+      setStories([]);
     }
   }, [subStatus, password]);
 
@@ -167,6 +186,24 @@ export default function App() {
     setupPushNotifications();
   }, [status, password]);
 
+  // Auto-advance logic for stories
+  useEffect(() => {
+    if (viewingStoryIdx !== null) {
+      const activeStory = stories[viewingStoryIdx];
+      if (activeStory) {
+        const timer = setTimeout(() => {
+          setViewingStoryIdx((prev) => {
+            if (prev !== null && prev < stories.length - 1) {
+              return prev + 1;
+            }
+            return null;
+          });
+        }, 7000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [viewingStoryIdx, stories]);
+
   // Submit Password (Step 1 Gateway)
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,6 +264,48 @@ export default function App() {
       setMoodError(err.message || 'Transmission disrupted.');
     } finally {
       setIsRequesting(false);
+    }
+  };
+
+  const handleImagePicker = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setStoryImageStr(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleStorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if ((!storyNote.trim() && !storyImageStr) || isUploadingStory) return;
+
+    setIsUploadingStory(true);
+    
+    try {
+      const response = await fetch('/api/story', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          image: storyImageStr,
+          note: storyNote, 
+          password: password 
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to upload story');
+      
+      // Reset
+      setStoryImageStr('');
+      setStoryNote('');
+      setShowStoryUpload(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsUploadingStory(false);
     }
   };
 
@@ -440,18 +519,42 @@ export default function App() {
                 >
                   {/* Subtle top header & History Button */}
                   <div className="absolute top-12 left-0 right-0 px-8 flex justify-between items-center w-full z-30" id="dashboard-header-text">
-                    <div className="inline-block glass-pill px-6 py-2 rounded-full invisible md:visible">
-                      <p className="font-serif italic text-xs md:text-sm text-white/80 tracking-[0.2em] font-light">
-                        Connection established.
-                      </p>
+                    {/* Minimalist Story Ring */}
+                    <div className="flex items-center gap-4">
+                      {stories.length > 0 ? (
+                        <button 
+                          onClick={() => setViewingStoryIdx(0)}
+                          className="relative flex items-center justify-center p-[2px] rounded-full bg-gradient-to-tr from-blue-400 to-purple-500 animate-pulse hover:scale-105 transition-transform"
+                        >
+                          <div className="bg-black rounded-full h-10 w-10 flex items-center justify-center">
+                            <span className="font-serif italic text-white/90 text-sm">M</span>
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="invisible md:visible inline-block glass-pill px-6 py-2 rounded-full">
+                          <p className="font-serif italic text-xs md:text-sm text-white/80 tracking-[0.2em] font-light">
+                            Connection established.
+                          </p>
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => setShowHistory(true)}
-                      className="glass-pill px-4 py-2 rounded-full flex items-center gap-2 hover:bg-white/10 transition-colors duration-300 text-white/70 hover:text-white"
-                    >
-                      <Clock size={14} className="opacity-70" />
-                      <span className="font-sans text-[10px] tracking-[0.2em] uppercase">History</span>
-                    </button>
+                    
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setShowStoryUpload(true)}
+                        className="glass-pill p-2 md:px-4 md:py-2 rounded-full flex items-center gap-2 hover:bg-white/10 transition-colors duration-300 text-white/70 hover:text-white"
+                      >
+                        <Camera size={14} className="opacity-70" />
+                        <span className="hidden md:inline font-sans text-[10px] tracking-[0.2em] uppercase">Capture</span>
+                      </button>
+                      <button
+                        onClick={() => setShowHistory(true)}
+                        className="glass-pill p-2 md:px-4 md:py-2 rounded-full flex items-center gap-2 hover:bg-white/10 transition-colors duration-300 text-white/70 hover:text-white"
+                      >
+                        <Clock size={14} className="opacity-70" />
+                        <span className="hidden md:inline font-sans text-[10px] tracking-[0.2em] uppercase">History</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Glassmorphic Pulse Center (Shifted up to allow more space for echoes) */}
@@ -666,6 +769,146 @@ export default function App() {
                             )}
                           </div>
                         </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Story Viewing Overlay */}
+                  <AnimatePresence>
+                    {viewingStoryIdx !== null && stories[viewingStoryIdx] && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.4 }}
+                        className="fixed inset-0 z-[100] bg-[#050505] flex flex-col justify-center items-center overflow-hidden pt-10"
+                      >
+                        {/* Progress Bar */}
+                        <div className="absolute top-4 left-4 right-4 h-1 bg-white/20 rounded-full overflow-hidden z-[101]">
+                          <motion.div
+                            key={stories[viewingStoryIdx].id}
+                            initial={{ width: 0 }}
+                            animate={{ width: '100%' }}
+                            transition={{ duration: 7, ease: 'linear' }}
+                            className="h-full bg-white/80"
+                          />
+                        </div>
+                        
+                        {/* Image background */}
+                        {stories[viewingStoryIdx].image && (
+                          <img 
+                            src={stories[viewingStoryIdx].image} 
+                            alt="Story"
+                            className="absolute inset-0 w-full h-full object-cover opacity-80"
+                          />
+                        )}
+
+                        {/* Top Gradient for text readability */}
+                        <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-black/80 to-transparent z-[50] pointer-events-none" />
+                        <div className="absolute bottom-0 inset-x-0 h-64 bg-gradient-to-t from-black/90 to-transparent z-[50] pointer-events-none" />
+
+                        {/* Close button top right */}
+                        <button
+                          onClick={() => setViewingStoryIdx(null)}
+                          className="absolute top-10 right-4 z-[102] p-2 text-white/60 hover:text-white"
+                        >
+                          <X size={24} />
+                        </button>
+
+                        {/* Note */}
+                        {stories[viewingStoryIdx].note && (
+                          <div className="absolute bottom-16 inset-x-8 text-center z-[101]">
+                            <p className="font-serif italic text-2xl md:text-3xl text-white drop-shadow-md leading-snug">
+                              "{stories[viewingStoryIdx].note}"
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Close/Next Overlay clicks */}
+                        <div className="absolute inset-0 z-[60] flex mt-12">
+                          <div className="w-1/3 h-full cursor-pointer" onClick={() => {
+                            if (viewingStoryIdx > 0) setViewingStoryIdx(viewingStoryIdx - 1);
+                          }} />
+                          <div className="w-2/3 h-full cursor-pointer" onClick={() => {
+                            if (viewingStoryIdx < stories.length - 1) setViewingStoryIdx(viewingStoryIdx + 1);
+                            else setViewingStoryIdx(null);
+                          }} />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Story Upload Overlay */}
+                  <AnimatePresence>
+                    {showStoryUpload && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex flex-col justify-center items-center p-6"
+                      >
+                        <div className="glass-panel w-full max-w-sm rounded-[2.5rem] p-8 flex flex-col items-center relative overflow-hidden">
+                          <button
+                            onClick={() => {
+                              setShowStoryUpload(false);
+                              setStoryImageStr('');
+                              setStoryNote('');
+                            }}
+                            className="absolute top-6 right-6 text-white/50 hover:text-white transition-colors"
+                          >
+                            <X size={20} />
+                          </button>
+                          
+                          <h3 className="font-serif italic text-2xl text-white/90 mb-6 text-center font-light">
+                            Capture Moment
+                          </h3>
+
+                          <form onSubmit={handleStorySubmit} className="w-full flex flex-col items-center gap-6">
+                            
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              ref={fileInputRef}
+                              onChange={handleImagePicker}
+                            />
+                            
+                            <div 
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full aspect-[4/5] bg-white/5 border border-white/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer overflow-hidden group hover:bg-white/10 transition-colors relative"
+                            >
+                              {storyImageStr ? (
+                                <img src={storyImageStr} alt="Preview" className="w-full h-full object-cover opacity-80" />
+                              ) : (
+                                <>
+                                  <ImageIcon size={32} className="text-white/30 mb-3 group-hover:text-white/50 transition-colors" />
+                                  <span className="font-sans text-[10px] uppercase tracking-widest text-white/30 group-hover:text-white/50">Select Image</span>
+                                </>
+                              )}
+                            </div>
+
+                            <input
+                              type="text"
+                              value={storyNote}
+                              onChange={(e) => setStoryNote(e.target.value)}
+                              placeholder="Add a thought..."
+                              className="w-full bg-transparent border-b border-white/20 pb-2 text-center font-serif text-lg text-white placeholder-white/30 outline-none focus:border-white/50 transition-colors"
+                            />
+
+                            <button
+                              type="submit"
+                              disabled={isUploadingStory || (!storyImageStr && !storyNote.trim())}
+                              className={`glass-pill px-8 py-3 rounded-full font-sans text-[10px] tracking-[0.3em] uppercase transition-all duration-300 flex items-center gap-2 ${
+                                (!storyImageStr && !storyNote.trim()) || isUploadingStory
+                                  ? 'text-white/20 cursor-not-allowed'
+                                  : 'text-white hover:bg-white/10'
+                              }`}
+                            >
+                              {isUploadingStory ? 'Sending...' : 'Transmit Moment'}
+                              {!isUploadingStory && <ArrowRight size={14} className="opacity-70" />}
+                            </button>
+                          </form>
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
