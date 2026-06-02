@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, X } from 'lucide-react';
+import { ArrowRight, X, Clock } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 
@@ -47,6 +47,7 @@ export default function App() {
   
   // Storage for incoming echoes
   const [echoes, setEchoes] = useState<{id: string, text: string, timestamp: number}[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // General Initialization
   useEffect(() => {
@@ -437,13 +438,20 @@ export default function App() {
                   className="flex flex-col items-center justify-center w-full h-full relative p-6"
                   id="dashboard-box"
                 >
-                  {/* Subtle top header */}
-                  <div className="absolute top-12 text-center w-full" id="dashboard-header-text">
-                    <div className="inline-block glass-pill px-6 py-2 rounded-full">
+                  {/* Subtle top header & History Button */}
+                  <div className="absolute top-12 left-0 right-0 px-8 flex justify-between items-center w-full z-30" id="dashboard-header-text">
+                    <div className="inline-block glass-pill px-6 py-2 rounded-full invisible md:visible">
                       <p className="font-serif italic text-xs md:text-sm text-white/80 tracking-[0.2em] font-light">
                         Connection established.
                       </p>
                     </div>
+                    <button
+                      onClick={() => setShowHistory(true)}
+                      className="glass-pill px-4 py-2 rounded-full flex items-center gap-2 hover:bg-white/10 transition-colors duration-300 text-white/70 hover:text-white"
+                    >
+                      <Clock size={14} className="opacity-70" />
+                      <span className="font-sans text-[10px] tracking-[0.2em] uppercase">History</span>
+                    </button>
                   </div>
 
                   {/* Glassmorphic Pulse Center (Shifted up to allow more space for echoes) */}
@@ -589,49 +597,78 @@ export default function App() {
                     )}
                   </AnimatePresence>
 
-                  {/* Echoes Floating Rendering (24-Hour Archive) */}
-                  {/* Positioned comfortably below the orb/response area */}
-                  <div 
-                    className="absolute top-[52%] bottom-32 w-full flex flex-col items-center px-6 pointer-events-none z-10 space-y-4 overflow-hidden" 
-                    style={{ 
-                      maskImage: 'linear-gradient(to bottom, black 5%, transparent 95%)', 
-                      WebkitMaskImage: 'linear-gradient(to bottom, black 5%, transparent 95%)' 
-                    }}
-                  >
-                    <AnimatePresence>
-                      {!orbExpanded && echoes.map((echo, idx) => {
-                        const hoursAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60 * 60)));
-                        const minutesAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60)));
-                        let timeText = "";
-                        if (hoursAgo === 0) {
-                          if (minutesAgo < 5) timeText = "Received just now";
-                          else timeText = `Received ${minutesAgo} min ago`;
-                        } else {
-                          timeText = `Received ${hoursAgo} hr${hoursAgo !== 1 ? 's' : ''} ago`;
-                        }
-
-                        return (
-                          <motion.div
-                            key={echo.id}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: Math.max(1 - (idx * 0.3), 0.1), y: 0 }}
-                            exit={{ opacity: 0, filter: 'blur(5px)' }}
-                            transition={{ duration: 1.5, delay: idx * 0.15, ease: 'easeOut' }}
-                            className="flex flex-col items-center text-center max-w-sm w-full pointer-events-auto"
+                  {/* History Drawer Overlay */}
+                  <AnimatePresence>
+                    {showHistory && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-50 flex justify-end"
+                      >
+                        <div 
+                          className="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-pointer" 
+                          onClick={() => setShowHistory(false)} 
+                        />
+                        <motion.div
+                          initial={{ x: '100%' }}
+                          animate={{ x: 0 }}
+                          exit={{ x: '100%' }}
+                          transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                          className="glass-panel relative w-full max-w-md h-full rounded-none md:rounded-l-[2.5rem] border-r-0 flex flex-col pt-24 pb-8 px-8 overflow-y-auto"
+                        >
+                          <button
+                            onClick={() => setShowHistory(false)}
+                            className="absolute top-8 right-8 p-3 rounded-full hover:bg-white/10 transition-colors duration-300 text-white/50 hover:text-white/90"
                           >
-                            <div className="glass-pill px-6 py-4 rounded-3xl w-full hover:bg-white/10 transition-colors duration-500">
-                              <p className="font-serif italic text-base md:text-lg text-white/90 font-light leading-relaxed mb-1.5 line-clamp-3">
-                                "{echo.text}"
+                            <X size={20} strokeWidth={1.5} />
+                          </button>
+                          
+                          <h3 className="font-sans text-xs tracking-[0.3em] uppercase text-white/40 mb-12 text-center">
+                            Memory Vault
+                          </h3>
+
+                          <div className="flex flex-col space-y-10">
+                            {echoes.length === 0 ? (
+                              <p className="text-center font-serif italic text-white/30 text-sm">
+                                No memories resonate in the past 24 hours.
                               </p>
-                              <span className="font-sans text-[8.5px] uppercase tracking-[0.2em] text-white/50">
-                                {timeText}
-                              </span>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
+                            ) : (
+                              echoes.map((echo, idx) => {
+                                const hoursAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60 * 60)));
+                                const minutesAgo = Math.max(0, Math.floor((Date.now() - echo.timestamp) / (1000 * 60)));
+                                let timeText = "";
+                                if (hoursAgo === 0) {
+                                  if (minutesAgo < 5) timeText = "Received just now";
+                                  else timeText = `Received ${minutesAgo} min ago`;
+                                } else {
+                                  timeText = `Received ${hoursAgo} hr${hoursAgo !== 1 ? 's' : ''} ago`;
+                                }
+
+                                return (
+                                  <motion.div
+                                    key={echo.id}
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ duration: 0.5, delay: idx * 0.1 }}
+                                    className="flex flex-col border-l border-white/10 pl-6 relative"
+                                  >
+                                    <div className="absolute top-0 -left-[5px] w-2.5 h-2.5 rounded-full bg-white/20" />
+                                    <p className="font-serif italic text-lg md:text-xl text-white/90 font-light leading-relaxed mb-3">
+                                      "{echo.text}"
+                                    </p>
+                                    <span className="font-sans text-[9px] uppercase tracking-[0.2em] text-white/40">
+                                      {timeText}
+                                    </span>
+                                  </motion.div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
 
                   {/* Status Panel Details at Bottom Staging */}
                   <div className="absolute bottom-8 flex flex-col items-center gap-4 text-center z-20 w-full" id="authorised-panel">
